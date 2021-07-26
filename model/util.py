@@ -1,7 +1,7 @@
 import tensorflow as tf
 from tensorflow.keras.layers import Embedding, Dense, Input
 import random
-from .config import FeatureConfig, ModelConfig
+from config import FeatureConfig, ModelConfig
 
 
 def data_gen(feature_config: FeatureConfig, model_config: ModelConfig):
@@ -53,6 +53,9 @@ def _data_gen(path: str, feature_config: FeatureConfig, model_config: ModelConfi
         feature = tf.io.parse_single_example(exam_proto, feature_description)
         label = feature["label"]
         feature.pop("label")  # 删除在模型中不用的特征
+        if "ifm" in model_config.model_type:
+            for f in list(feature_config.NUM_COLUMNS) + list(feature_config.CAT_COLUMNS):
+                feature["IFM_{}".format(f)] = feature[f]
         return feature, label
 
     tensor = reader \
@@ -80,7 +83,7 @@ def define_input_layer(sparse_feature: list, dense_feature: list, cat_id_map: di
             embeddings_regularizer=model_config.kernel_regularizer,
             name="sparse_embedding_layer_{}".format(f),
         )
-        if model_config.model_type == "ifm":
+        if "ifm" in model_config.model_type:
             sparse_feature_layer["IFM_{}".format(f)] = Embedding(
                 input_dim=cat_id_map[f] + 1 if f in cat_id_map else cat_id_map["default"],
                 input_length=1,
@@ -100,7 +103,7 @@ def define_input_layer(sparse_feature: list, dense_feature: list, cat_id_map: di
             use_bias=False,
             name="dense_feature_layer_{}".format(f)
         )
-        if model_config.model_type == "ifm":
+        if "ifm" in model_config.model_type:
             dense_feature_layer["IFM_{}".format(f)] = Dense(
                 units=model_config.ifm_hidden_units,
                 kernel_initializer=model_config.kernel_initializer,
@@ -120,13 +123,13 @@ def define_input_tensor(sparse_feature: list, dense_feature: list, emb_feature: 
     input, sparse_feature_input, dense_feature_input, emb_feature_input = {}, {}, {}, {}
     for f in sparse_feature:
         sparse_feature_input[f] = Input(shape=(1,), name=f, dtype=tf.float32)
-        if model_config.model_type == "ifm":
+        if "ifm" in model_config.model_type:
             sparse_feature_input["IFM_{}".format(f)] = Input(shape=(1,), name="IFM_{}".format(f), dtype=tf.float32)
     for f in emb_feature:
         emb_feature_input[f] = Input(shape=(199,), name=f, dtype=tf.float32)
     for f in dense_feature:
         dense_feature_input[f] = Input(shape=(1,), name=f, dtype=tf.float32)
-        if model_config.model_type == "ifm":
+        if "ifm" in model_config.model_type:
             dense_feature_input["IFM_{}".format(f)] = Input(shape=(1,), name="IFM_{}".format(f), dtype=tf.float32)
     input.update(sparse_feature_input)
     input.update(emb_feature_input)
