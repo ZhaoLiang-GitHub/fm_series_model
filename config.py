@@ -32,7 +32,9 @@ class ModelConfig(object):
         Attribute
 
         """
-        self.model_type = "deepfm"
+        self.model_type = "deepifm"
+        self.ckpt = "./data/ckpt"
+        self.tb = "./data/tb"
 
         self.learning_rate = 0.01
         self.batch_size = 1024
@@ -45,29 +47,5 @@ class ModelConfig(object):
         self.bias_initializer = random_normal()
         self.dnn_dim = [128, 64, 32]
         self.dropout_rate = 0.2
-        self.ckpt = "./data/ckpt"
-        self.tb = "./data/tb"
         self.afm_attention_units = (self.embedding_size // 5) + 1
-
-        self.nfm_fm_type = "fm"
-
         self.ifm_hidden_units = (self.embedding_size // 5) + 1
-        # self.params = {
-        #     'k': 8,
-        #     'dnn_dim': [256, 128, 64],  # [256, 128, 64]
-        #     'dnn_dr': 0.5,
-        #     'epochs': 50,
-        #     'batch_size': 1024 * 4,
-        #     'feat_style': 'std',
-        #     'attention_dr': 0.5,  # 0.2
-        #     'lr': 1e-3,  # 1e-3
-        #     'field_interaction_factor': 16,
-        #     'sampling': 0.1,
-        #     'threshold': 6000,  # num of batches
-        #     'use_weight': True,
-        #     'use_hvd': True,
-        #     'model_name': "theme-mmoe-page-theme"
-        # }
-        #
-        # self.use_hvd = self.params['use_hvd']  # use parallel training or not, set to False if running local test
-        # job_dir = self.params["model_name"]

@@ -1,8 +1,8 @@
-from tensorflow.keras.layers import Layer, Dense, BatchNormalization, Dropout
+from tensorflow.keras.layers import Layer, Dense, BatchNormalization, Dropout, Softmax, Flatten, Concatenate
 from tensorflow.keras.activations import linear, relu
 import tensorflow as tf
 import itertools
-from .config import ModelConfig
+from config import ModelConfig
 
 
 class DNN(Layer):
@@ -19,14 +19,14 @@ class DNN(Layer):
                 units=i,
                 kernel_initializer=self.config.kernel_initializer,
                 kernel_regularizer=self.config.kernel_regularizer,
-                activation=tf.keras.activations.relu,
+                activation=relu,
                 use_bias=True,
                 bias_initializer=self.config.bias_initializer,
                 name="dnn_layer_{}".format(i),
             ))
         self.output_dense = Dense(
             units=1,
-            activation=tf.keras.activations.linear,
+            activation=linear,
             kernel_initializer=self.config.kernel_initializer,
             kernel_regularizer=self.config.kernel_regularizer,
             name="dnn_output",
@@ -65,8 +65,8 @@ class FM_interaction(Layer):
         for f1, f2 in itertools.combinations(inputs, 2):
             row.append(f1)
             col.append(f2)
-        p = tf.keras.layers.Concatenate(axis=1)(row)
-        q = tf.keras.layers.Concatenate(axis=1)(col)
+        p = Concatenate(axis=1)(row)
+        q = Concatenate(axis=1)(col)
         linear_output = p * q
         return linear_output
 
@@ -136,10 +136,9 @@ class AFM_interaction(Layer):
 
     def build(self, input_shape):
         self.built = True
-        self.sorfmax = tf.keras.layers.Softmax()
         self.W = Dense(
             units=self.config.afm_attention_units,
-            activation=tf.keras.activations.relu,
+            activation=relu,
             kernel_initializer=self.config.kernel_initializer,
             kernel_regularizer=self.config.kernel_regularizer,
             use_bias=True,
@@ -147,57 +146,59 @@ class AFM_interaction(Layer):
         )
         self.h = Dense(
             units=1,
-            activation=tf.keras.activations.linear,
+            activation=linear,
             kernel_initializer=self.config.kernel_initializer,
             kernel_regularizer=self.config.kernel_regularizer,
         )
+
     def call(self, inputs, *args, **kwargs):
         interaction = FM_interaction()(inputs)
-        attention_score = self.sorfmax(self.h(self.W(interaction)))
+        attention_score = Softmax()(self.h(self.W(interaction)))
         afm_out = interaction * attention_score
+
         return afm_out
 
     def compute_output_shape(self, input_shape):
         return None, input_shape[1] * (input_shape[1] - 1) / 2, input_shape[2]
 
 
-class AFM_pool(Layer):
-    """
-    AFM
-    """
-
-    def __init__(self, model_config: ModelConfig, **kwargs):
-        self.config = model_config
-        super(AFM_pool, self).__init__(**kwargs)
-
-    def build(self, input_shape):
-        self.built = True
-
-    def call(self, inputs, *args, **kwargs):
-        interaction = AFM_interaction(self.config)(inputs)
-        afm_out = tf.reduce_sum(interaction, axis=1, keepdims=True)
-        return afm_out
-
-    def compute_output_shape(self, input_shape):
-        return None, 1, input_shape[2]
-
-
 class AFM_num(Layer):
-    """
-    AFM
-    """
-
     def __init__(self, model_config: ModelConfig, **kwargs):
         self.config = model_config
         super(AFM_num, self).__init__(**kwargs)
 
     def build(self, input_shape):
+        self.W = Dense(
+            units=self.config.afm_attention_units,
+            activation=relu,
+            kernel_initializer=self.config.kernel_initializer,
+            kernel_regularizer=self.config.kernel_regularizer,
+            use_bias=True,
+            bias_initializer=self.config.bias_initializer,
+            name="afm_w",
+        )
+        self.h = Dense(
+            units=1,
+            activation=linear,
+            kernel_initializer=self.config.kernel_initializer,
+            kernel_regularizer=self.config.kernel_regularizer,
+            name="afm_h",
+        )
+        self.p = Dense(
+            units=1,
+            activation=linear,
+            kernel_initializer=self.config.kernel_initializer,
+            kernel_regularizer=self.config.kernel_regularizer,
+            use_bias=False,
+            name="afm_p",
+        )
         self.built = True
 
     def call(self, inputs, *args, **kwargs):
-        interaction = AFM_pool(self.config)(inputs)
-        afm_out = tf.reduce_sum(interaction, axis=2, keepdims=False)
-        return afm_out
+        interaction = FM_interaction()(inputs)
+        attention_score = Softmax()(self.h(self.W(interaction)))
+        output = self.p(tf.reduce_sum(attention_score * interaction, axis=1, ))
+        return output
 
     def compute_output_shape(self, input_shape):
         return None, 1
@@ -210,13 +211,34 @@ class NFM(Layer):
 
     def build(self, input_shape):
         self.built = True
+        self.bn = BatchNormalization()
+        self.dropout = Dropout(self.config.dropout_rate, trainable=True)
+        self.dnn_dense = []
+        for i in self.config.dnn_dim:
+            self.dnn_dense.append(Dense(
+                units=i,
+                kernel_initializer=self.config.kernel_initializer,
+                kernel_regularizer=self.config.kernel_regularizer,
+                activation=relu,
+                use_bias=True,
+                bias_initializer=self.config.bias_initializer,
+                name="dnn_layer_{}".format(i),
+            ))
+        self.output_dense = Dense(
+            units=1,
+            activation=linear,
+            kernel_initializer=self.config.kernel_initializer,
+            kernel_regularizer=self.config.kernel_regularizer,
+            name="dnn_output",
+        )
 
     def call(self, inputs, *args, **kwargs):
-        if self.config.nfm_fm_type == "fm":
-            interaction = FM_interaction()(inputs)
-        elif self.config.nfm_fm_type == "afm":
-            interaction = AFM_interaction(self.config)(inputs)
-        nfm_out = DNN(self.config)(interaction)
+        interaction = FM_interaction()(inputs)
+        linear_input = self.bn(Flatten()(interaction))
+        for _ in range(len(self.config.dnn_dim)):
+            linear_input = self.dropout(linear_input)
+            linear_input = self.dnn_dense[_](linear_input)
+        nfm_out = self.output_dense(linear_input)
         return nfm_out
 
     def compute_output_shape(self, input_shape):
@@ -238,10 +260,26 @@ class IFM(Layer):
             use_bias=False,
             trainable=True,
         )
+        self.W = Dense(
+            units=self.config.afm_attention_units,
+            activation=relu,
+            kernel_initializer=self.config.kernel_initializer,
+            kernel_regularizer=self.config.kernel_regularizer,
+            use_bias=True,
+            bias_initializer=self.config.bias_initializer,
+        )
+        self.h = Dense(
+            units=1,
+            activation=linear,
+            kernel_initializer=self.config.kernel_initializer,
+            kernel_regularizer=self.config.kernel_regularizer,
+        )
+
 
     def call(self, inputs, *args, **kwargs):
-        print(inputs)
-        afm_out = AFM_interaction(self.config)(inputs[0])
+        interaction = FM_interaction()(inputs[0])
+        attention_score = Softmax()(self.h(self.W(interaction)))
+        afm_out = interaction * attention_score
         field_feature_score = self.field_feature_score(FM_interaction()(inputs[1]))
         ifm_output = tf.reduce_sum(tf.reduce_sum(afm_out * field_feature_score, axis=-1), axis=-1, keepdims=True)
         return ifm_output
